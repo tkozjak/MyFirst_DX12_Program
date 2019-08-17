@@ -39,6 +39,7 @@ bool InitializeWindow(HINSTANCE hInstance,
 // main application loop
 void mainloop();
 
+
 // callback function for windows messages
 LRESULT CALLBACK WndProc(HWND hWnd,
 	UINT msg,

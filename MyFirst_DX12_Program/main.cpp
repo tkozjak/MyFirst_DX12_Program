@@ -9,8 +9,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
 	// create the window
 	if (!InitializeWindow(hInstance, nCmdShow, Width, Height, FullScreen))
 	{
-		MessageBox(0, "Window Initialization - Failed",
-			"Error", MB_OK);
+		MessageBox(0, "Window Initialization - Failed", "Error", MB_OK);
 		return 0;
 	}
 
