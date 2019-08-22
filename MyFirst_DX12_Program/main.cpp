@@ -8,11 +8,13 @@ UINT g_frameIndex;
 
 
 // DIRECT X 12 STUFF
-ComPtr<ID3D12Device> g_device;							// DirectX12 chain
+ComPtr<ID3D12Device3> g_device;							// DirectX12 chain
 ComPtr<ID3D12CommandQueue> g_commandQueue;				// command queue
 ComPtr<IDXGISwapChain3> g_swapChain;					// swap chain
 ComPtr<ID3D12Resource> g_renderTargets[g_frameCount];	// back buffers
 ComPtr<ID3D12DescriptorHeap> g_rtvHeap;					// render target view descriptor heap
+ComPtr<ID3D12CommandAllocator> g_commandAllocator;		// command allocator
+UINT g_rtvDescriptorSize;
 
 
 void DirectXSetup() {
@@ -72,7 +74,7 @@ void DirectXSetup() {
 
 	ComPtr<IDXGISwapChain1> swapChain;
 	ThrowIfFailed(factory->CreateSwapChainForHwnd(
-		g_commandQueue.Get(),        // Swap chain needs the queue so that it can force a flush on it.
+		g_commandQueue.Get(),        // Swap chain needs the DIRECT queue so that it can force a flush on it.
 		hwnd,
 		&swapChainDesc,
 		nullptr,
@@ -85,6 +87,36 @@ void DirectXSetup() {
 
 	ThrowIfFailed(swapChain.As(&g_swapChain));
 	g_frameIndex = g_swapChain->GetCurrentBackBufferIndex();
+
+
+	// Create RTV descriptor heaps.
+	{
+		// Describe and create a render target view (RTV) descriptor heap.
+		D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
+		rtvHeapDesc.NumDescriptors = g_frameCount;
+		rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+		rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+		ThrowIfFailed(g_device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS( &g_rtvHeap )));
+
+		g_rtvDescriptorSize = g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+	}
+
+	// Create render target view (descriptor) - connect it to the backbuffer in the swap chain and connect it w the rtv heap
+	{
+		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(g_rtvHeap->GetCPUDescriptorHandleForHeapStart());
+
+		// Create a RTV for each frame.
+		for (UINT n = 0; n < g_frameCount; n++)
+		{
+			ThrowIfFailed( g_swapChain->GetBuffer( n, IID_PPV_ARGS(&g_renderTargets[n]) ) );
+			g_device->CreateRenderTargetView( g_renderTargets[n].Get(), nullptr, rtvHandle );
+			rtvHandle.Offset( 1, g_rtvDescriptorSize );
+		}
+	}
+
+	// create command allocator
+	ThrowIfFailed(g_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&g_commandAllocator)));
+
 }
 
 
@@ -216,12 +248,13 @@ LRESULT CALLBACK WndProc(HWND hwnd,
 		}
 		return 0;
 
+	case WM_PAINT:
+		//DBOUT("PAint called! \n");
+		return 0;
+
 	case WM_DESTROY:
 		PostQuitMessage(0);
 		return 0;
 	}
-	return DefWindowProc(hwnd,
-		msg,
-		wParam,
-		lParam);
+	return DefWindowProc(hwnd, msg, wParam, lParam);
 }
