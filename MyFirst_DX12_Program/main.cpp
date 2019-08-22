@@ -1,6 +1,91 @@
 #include "stdafx.h"
 
 
+// globals
+static const UINT g_frameCount = 2;
+bool g_useWarpDevice = false;
+UINT g_frameIndex;
+
+
+// DIRECT X 12 STUFF
+ComPtr<ID3D12Device> g_device;							// DirectX12 chain
+ComPtr<ID3D12CommandQueue> g_commandQueue;				// command queue
+ComPtr<IDXGISwapChain3> g_swapChain;					// swap chain
+ComPtr<ID3D12Resource> g_renderTargets[g_frameCount];	// back buffers
+ComPtr<ID3D12DescriptorHeap> g_rtvHeap;					// render target view descriptor heap
+
+
+void DirectXSetup() {
+
+	UINT dxgiFactoryFlags = 0;
+
+#if defined(_DEBUG)
+	// Enable the debug layer (requires the Graphics Tools "optional feature").
+	// NOTE: Enabling the debug layer after device creation will invalidate the active device.
+	{
+		ComPtr<ID3D12Debug> debugController;
+		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))
+		{
+			debugController->EnableDebugLayer();
+
+			// Enable additional debug layers.
+			dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
+		}
+	}
+#endif
+	
+	// enumerate physical adapters
+	ComPtr<IDXGIFactory7> factory;
+	ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
+
+	ComPtr<IDXGIAdapter1> hardwareAdapter;
+	factory->EnumAdapters1(0, &hardwareAdapter);
+	DXGI_ADAPTER_DESC1 desc;
+	hardwareAdapter->GetDesc1(&desc);
+	DBOUT( desc.Description );
+	DBOUT( "\n" );
+
+	// create device
+	if (SUCCEEDED(D3D12CreateDevice( hardwareAdapter.Get(), D3D_FEATURE_LEVEL_11_0, _uuidof(ID3D12Device), nullptr)))
+	{
+		DBOUT( "Device created (test).");
+		DBOUT("\n");
+	}
+	ThrowIfFailed(D3D12CreateDevice( hardwareAdapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&g_device)	));
+	
+	//create command queue
+	D3D12_COMMAND_QUEUE_DESC queueDesc = {};
+	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+	ThrowIfFailed(g_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&g_commandQueue)));
+
+
+	// create swap chain
+	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
+	swapChainDesc.BufferCount = g_frameCount;
+	swapChainDesc.Width = Width;
+	swapChainDesc.Height = Height;
+	swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	swapChainDesc.SampleDesc.Count = 1;
+
+	ComPtr<IDXGISwapChain1> swapChain;
+	ThrowIfFailed(factory->CreateSwapChainForHwnd(
+		g_commandQueue.Get(),        // Swap chain needs the queue so that it can force a flush on it.
+		hwnd,
+		&swapChainDesc,
+		nullptr,
+		nullptr,
+		&swapChain
+	));
+	
+	// This sample does not support fullscreen transitions.
+	ThrowIfFailed(factory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER));
+
+	ThrowIfFailed(swapChain.As(&g_swapChain));
+	g_frameIndex = g_swapChain->GetCurrentBackBufferIndex();
+}
 
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
@@ -12,6 +97,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
 		MessageBox(0, "Window Initialization - Failed", "Error", MB_OK);
 		return 0;
 	}
+
+	DirectXSetup();
+
+	::ShowWindow(hwnd, SW_SHOW);
+
+	DBOUT(" TEST \n");
 
 	// start the main loop
 	mainloop();
@@ -82,8 +173,8 @@ bool InitializeWindow(HINSTANCE hInstance,
 		SetWindowLong(hwnd, GWL_STYLE, 0);
 	}
 
-	ShowWindow(hwnd, ShowWnd);
-	UpdateWindow(hwnd);
+	//ShowWindow(hwnd, ShowWnd);
+	//UpdateWindow(hwnd);
 
 	return true;
 }
