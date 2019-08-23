@@ -10,7 +10,6 @@
 #include <D3Dcompiler.h>
 #include <DirectXMath.h>
 #include "d3dx12.h"
-
 #include <iostream>
 #include <sstream>
 
@@ -32,7 +31,7 @@ inline void ThrowIfFailed(HRESULT hr)
 
 
 using Microsoft::WRL::ComPtr;
-
+using namespace DirectX;
 
 // handle to our window
 HWND hwnd = NULL;
