@@ -88,6 +88,11 @@ void DirectXSetup() {
 	ThrowIfFailed(swapChain.As(&g_swapChain));
 	g_frameIndex = g_swapChain->GetCurrentBackBufferIndex();
 
+	//print current backbuffer index
+	DBOUT( "Init function. Current BackBufer index: ");
+	DBOUT( g_frameIndex );
+	DBOUT( "\n" );
+
 
 	// Create RTV descriptor heaps.
 	{
