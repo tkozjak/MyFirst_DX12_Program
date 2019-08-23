@@ -4,8 +4,9 @@
 // globals
 static const UINT g_frameCount = 2;
 bool g_useWarpDevice = false;
-UINT g_frameIndex;
 
+CD3DX12_VIEWPORT g_viewport(0.0f, 0.0f, static_cast<float>(Width), static_cast<float>(Height));
+CD3DX12_RECT g_scissorRect(0, 0, static_cast<LONG>(Width), static_cast<LONG>(Height));
 
 // DIRECT X 12 STUFF
 ComPtr<ID3D12Device3> g_device;							// DirectX12 chain
@@ -13,8 +14,16 @@ ComPtr<ID3D12CommandQueue> g_commandQueue;				// command queue
 ComPtr<IDXGISwapChain3> g_swapChain;					// swap chain
 ComPtr<ID3D12Resource> g_renderTargets[g_frameCount];	// back buffers
 ComPtr<ID3D12DescriptorHeap> g_rtvHeap;					// render target view descriptor heap
-ComPtr<ID3D12CommandAllocator> g_commandAllocator;		// command allocator
-UINT g_rtvDescriptorSize;
+ComPtr<ID3D12CommandAllocator> g_commandAllocator;		// command allocator (per rendered frame)
+ComPtr<ID3D12GraphicsCommandList> g_commandList;		// command list
+UINT g_rtvDescriptorSize;								// rtv descriptor size
+ComPtr<ID3D12PipelineState> g_pipelineState;
+
+// sync
+UINT g_frameIndex;				// backbuffer index about to be rendered into
+HANDLE g_fenceEvent;			// event called by fence to start stalled CPU thread
+ComPtr<ID3D12Fence> g_fence;	// fence object for out only command queue
+UINT64 g_fenceValue;			// variable to track fence value
 
 
 void DirectXSetup() {
@@ -124,6 +133,111 @@ void DirectXSetup() {
 
 }
 
+void WaitForPreviousFrame() {
+	// WAITING FOR THE FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
+	// This is code implemented as such for simplicity. The D3D12HelloFrameBuffering
+	// sample illustrates how to use fences for efficient resource usage and to
+	// maximize GPU utilization.
+
+	// Signal and increment the fence value.
+	const UINT64 fence = g_fenceValue;
+	ThrowIfFailed(g_commandQueue->Signal(g_fence.Get(), fence));
+	g_fenceValue++;
+
+	// Wait until the previous frame is finished.
+	if (g_fence->GetCompletedValue() < fence)
+	{
+		ThrowIfFailed(g_fence->SetEventOnCompletion(fence, g_fenceEvent));
+		WaitForSingleObject(g_fenceEvent, INFINITE);
+	}
+
+	//let us wait before next render (diagnostic)
+	WaitForSingleObject(nullptr, 5000);
+
+	g_frameIndex = g_swapChain->GetCurrentBackBufferIndex();
+
+	//print current backbuffer index
+	DBOUT("Wait for frame function. Current BackBufer index: ");
+	DBOUT(g_frameIndex);
+	DBOUT("\n");
+}
+
+void SetupScene() {
+
+	// Create the command list.
+	ThrowIfFailed(g_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, g_commandAllocator.Get(), nullptr, IID_PPV_ARGS(&g_commandList)));
+	ThrowIfFailed(g_commandList->Close());
+
+
+	// Create synchronization objects and wait until assets have been uploaded to the GPU.
+	{
+		ThrowIfFailed(g_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&g_fence)));
+		g_fenceValue = 1;
+
+		// Create an event handle to use for frame synchronization.
+		g_fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+		if (g_fenceEvent == nullptr)
+		{
+			ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+		}
+
+		// Wait for the command list to execute; we are reusing the same command 
+		// list in our main loop but for now, we just want to wait for setup to 
+		// complete before continuing.
+		WaitForPreviousFrame();
+	}
+
+}
+
+void RecordCommands() {
+	ThrowIfFailed( g_commandAllocator->Reset() );
+	ThrowIfFailed( g_commandList->Reset( g_commandAllocator.Get(), nullptr ) );
+
+	g_commandList->RSSetViewports(1, &g_viewport);
+	g_commandList->RSSetScissorRects(1, &g_scissorRect);
+
+	// Indicate that the back buffer will be used as a render target.
+	g_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(g_renderTargets[g_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(g_rtvHeap->GetCPUDescriptorHandleForHeapStart(), g_frameIndex, g_rtvDescriptorSize);
+	g_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+
+	// Record commands.
+	const float clearColor[] = { 1.0f, 0.2f, 0.4f, 1.0f };
+	g_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+
+	// Indicate that the back buffer will now be used to present.
+	g_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(g_renderTargets[g_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
+
+	ThrowIfFailed(g_commandList->Close());
+}
+
+void UpdateFrame() {
+
+}
+
+void Render() {
+
+	// Record all the commands we need to render the scene into the command list.
+	RecordCommands();
+
+	// Execute the command list.
+	ID3D12CommandList* ppCommandLists[] = { g_commandList.Get() };
+	g_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+
+	// Present the frame.
+	ThrowIfFailed(g_swapChain->Present(1, 0));
+
+	WaitForPreviousFrame();
+}
+
+void Destroy() {
+	// Ensure that the GPU is no longer referencing resources that are about to be
+	// cleaned up by the destructor.
+	WaitForPreviousFrame();
+
+	CloseHandle(g_fenceEvent);
+}
+
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
 {
@@ -136,6 +250,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
 	}
 
 	DirectXSetup();
+	SetupScene();
 
 	::ShowWindow(hwnd, SW_SHOW);
 
@@ -255,6 +370,8 @@ LRESULT CALLBACK WndProc(HWND hwnd,
 
 	case WM_PAINT:
 		//DBOUT("PAint called! \n");
+		UpdateFrame();
+		Render();
 		return 0;
 
 	case WM_DESTROY:
